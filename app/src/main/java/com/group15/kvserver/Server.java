@@ -1,9 +1,6 @@
 package com.group15.kvserver;
 
-import java.io.BufferedInputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Map;
@@ -36,6 +33,7 @@ class ServerDatabase {
 
     public ServerDatabase() {
         this.database = new java.util.HashMap<>();
+        this.users = new java.util.HashMap<>();
     }
 }
 
@@ -55,12 +53,24 @@ class ServerWorker implements Runnable {
 
             boolean running = true;
             while (running) {
-                short requestType = in.readShort();
-                RequestType r = RequestType.values()[requestType];
-                DataOutputStream stream = handleRequest(r, in);
+                try {
+                    short requestType = in.readShort();
 
-                if (stream != null) {
-                    stream.flush();
+                    if (requestType >= 0 && requestType < RequestType.values().length) {
+                        RequestType r = RequestType.values()[requestType];
+                        DataOutputStream stream = handleRequest(r, in);
+
+                        if (stream != null) {
+                            stream.flush();
+                        }
+                    } else {
+                        System.out.println("Error -> requestType: " + requestType);
+                    }
+                }
+                catch (EOFException e) {
+                    // Client disconnects
+                    System.out.println("Client disconnected.");
+                    running = false;
                 }
             }
 
@@ -82,7 +92,7 @@ class ServerWorker implements Runnable {
             case AuthRequest:
                 return handleAuthRequest(in);
             case RegisterRequest:
-                // return handleRegisterRequest(in);
+                return handleRegisterRequest(in);
             case PutRequest:
                 // handlePutRequest(in);
             case GetRequest:
@@ -115,6 +125,29 @@ class ServerWorker implements Runnable {
             return null;
         }
     }
+
+    private DataOutputStream handleRegisterRequest(DataInputStream in) {
+        try {
+            String username = in.readUTF();
+            String password = in.readUTF();
+
+            if (database.users.containsKey(username)) {
+                DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                out.writeBoolean(false);
+                return out;
+            } else {
+                database.users.put(username, password);
+
+                DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                out.writeBoolean(true);
+                return out;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
 
     void put(String key, byte[] value) {
         database.database.put(key, value);
