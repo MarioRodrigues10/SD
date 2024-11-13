@@ -85,8 +85,6 @@ class ServerWorker implements Runnable {
     }
 
     public DataOutputStream handleRequest(RequestType requestType, DataInputStream in){
-        // TODO: Auth -> Mário
-        // TODO: Puts -> Lobo
         // TODO: Gets -> Rita
 
         switch (requestType) {
@@ -95,11 +93,11 @@ class ServerWorker implements Runnable {
             case RegisterRequest:
                 return handleRegisterRequest(in);
             case PutRequest:
-                // handlePutRequest(in);
+                return handlePutRequest(in);
             case GetRequest:
                 // return handleGetRequest(in);
             case MultiPutRequest:
-                // handleMultiPutRequest(in);
+                return handleMultiPutRequest(in);
             case MultiGetRequest:
                 // return handleMultiGetRequest(in);
             default:
@@ -153,20 +151,71 @@ class ServerWorker implements Runnable {
         }
     }
 
+    private DataOutputStream handlePutRequest(DataInputStream in){
+        try {
+            String key = in.readUTF();
+            int valueLength = in.readInt();
+            byte[] value = new byte[valueLength];
+            in.readFully(value);
 
-    void put(String key, byte[] value) {
-        database.database.put(key, value);
+            put(key, value);
+
+            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+            out.writeBoolean(true);
+            return out;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }
     }
 
-    byte[] get(String key) {
+    private DataOutputStream handleMultiPutRequest(DataInputStream in) {
+        try {
+            // N PAIRS | KEY | VALUE LENGTH | VALUE | KEY | VALUE LENGTH | VALUE | ...
+            int numberOfPairs = in.readInt();
+            Map<String, byte[]> pairs = new java.util.HashMap<>();
+    
+            for (int i = 0; i < numberOfPairs; i++) {
+                String key = in.readUTF();
+                int valueLength = in.readInt();
+                byte[] value = new byte[valueLength];
+                in.readFully(value);
+                pairs.put(key, value);
+            }
+    
+            multiPut(pairs);
+    
+            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+            out.writeBoolean(true);
+            return out;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+    
+
+    private void put(String key, byte[] value) {
+        lock.writeLock().lock();
+        try {
+            database.database.put(key, value);
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    private byte[] get(String key) {
         return database.database.get(key);
     }
 
-    void multiPut(Map<String, byte[]> pairs) {
-        database.database.putAll(pairs);
+    
+    private void multiPut(Map<String, byte[]> pairs) {
+        for (Map.Entry<String, byte[]> entry : pairs.entrySet()) {
+            put(entry.getKey(), entry.getValue());
+        }
     }
 
-    Map<String, byte[]> multiGet(Set<String> keys) {
+    private Map<String, byte[]> multiGet(Set<String> keys) {
         return database.database.entrySet().stream()
             .filter(entry -> keys.contains(entry.getKey()))
             .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
