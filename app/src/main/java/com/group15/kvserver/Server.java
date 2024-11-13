@@ -4,6 +4,7 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.Set;
 
 enum RequestType {
@@ -40,6 +41,7 @@ class ServerDatabase {
 class ServerWorker implements Runnable {
     private Socket socket;
     private ServerDatabase database;
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
     public ServerWorker(Socket socket, ServerDatabase database) {
         this.socket = socket;
@@ -55,7 +57,6 @@ class ServerWorker implements Runnable {
             while (running) {
                 try {
                     short requestType = in.readShort();
-
                     if (requestType >= 0 && requestType < RequestType.values().length) {
                         RequestType r = RequestType.values()[requestType];
                         DataOutputStream stream = handleRequest(r, in);
@@ -107,6 +108,7 @@ class ServerWorker implements Runnable {
     }
 
     private DataOutputStream handleAuthRequest(DataInputStream in) {
+        lock.readLock().lock(); 
         try {
             String username = in.readUTF();
             String password = in.readUTF();
@@ -115,18 +117,19 @@ class ServerWorker implements Runnable {
                 DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                 out.writeBoolean(true);
                 return out;
-            }
-            else {
+            } else {
                 return null;
             }
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             e.printStackTrace();
             return null;
+        } finally {
+            lock.readLock().unlock(); 
         }
     }
 
     private DataOutputStream handleRegisterRequest(DataInputStream in) {
+        lock.writeLock().lock();
         try {
             String username = in.readUTF();
             String password = in.readUTF();
@@ -145,6 +148,8 @@ class ServerWorker implements Runnable {
         } catch (IOException e) {
             e.printStackTrace();
             return null;
+        } finally {
+            lock.writeLock().unlock();
         }
     }
 

@@ -5,11 +5,13 @@ import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class ClientLibrary {
     private Socket socket;
     private DataOutputStream out;
     private DataInputStream in;
+    private final ReentrantLock lock = new ReentrantLock();
 
     public ClientLibrary(String host, int port) throws IOException {
         this.socket = new Socket(host, port);
@@ -18,19 +20,29 @@ public class ClientLibrary {
     }
 
     public boolean authenticate(String username, String password) throws IOException {
-        out.writeShort(RequestType.AuthRequest.getValue());
-        out.writeUTF(username);
-        out.writeUTF(password);
-        out.flush();
-        return in.readBoolean();
+        lock.lock();
+        try {
+            out.writeShort(RequestType.AuthRequest.getValue());
+            out.writeUTF(username);
+            out.writeUTF(password);
+            out.flush();
+            return in.readBoolean();
+        } finally {
+            lock.unlock();
+        }
     }
 
     public boolean register(String username, String password) throws IOException {
-        out.writeShort(RequestType.RegisterRequest.getValue());
-        out.writeUTF(username);
-        out.writeUTF(password);
-        out.flush();
-        return in.readBoolean();
+        lock.lock();
+        try {
+            out.writeShort(RequestType.RegisterRequest.getValue());
+            out.writeUTF(username);
+            out.writeUTF(password);
+            out.flush();
+            return in.readBoolean();
+        } finally {
+            lock.unlock();
+        }
     }
 
     public void put(String key, byte[] value) throws IOException {
