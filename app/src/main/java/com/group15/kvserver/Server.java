@@ -3,6 +3,7 @@ package com.group15.kvserver;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.Set;
@@ -85,7 +86,6 @@ class ServerWorker implements Runnable {
     }
 
     public DataOutputStream handleRequest(RequestType requestType, DataInputStream in){
-        // TODO: Gets -> Rita
 
         switch (requestType) {
             case AuthRequest:
@@ -95,11 +95,11 @@ class ServerWorker implements Runnable {
             case PutRequest:
                 return handlePutRequest(in);
             case GetRequest:
-                // return handleGetRequest(in);
+                return handleGetRequest(in);
             case MultiPutRequest:
                 return handleMultiPutRequest(in);
             case MultiGetRequest:
-                // return handleMultiGetRequest(in);
+                return handleMultiGetRequest(in);
             default:
                 return null;
         }
@@ -160,8 +160,23 @@ class ServerWorker implements Runnable {
 
             put(key, value);
 
+            return null;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    private DataOutputStream handleGetRequest(DataInputStream in){
+        try {
+            // KEY
+            String key = in.readUTF();
+            byte[] value = get(key);
             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-            out.writeBoolean(true);
+
+            // VALUE SIZE | VALUE
+            out.writeInt(value.length);
+            out.write(value);
             return out;
         } catch (IOException e) {
             e.printStackTrace();
@@ -184,16 +199,41 @@ class ServerWorker implements Runnable {
             }
     
             multiPut(pairs);
-    
+
+            return null;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    private DataOutputStream handleMultiGetRequest(DataInputStream in) {
+        try {
+            // N KEYS | KEY | ...
+            int numberOfKeys = in.readInt();
+            Set<String> keys = new java.util.HashSet<>();
+            for (int i = 0; i < numberOfKeys; i++) {
+                String key = in.readUTF();
+                keys.add(key);
+            }
+            Map<String, byte[]> pairs = multiGet(keys);
             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-            out.writeBoolean(true);
+
+            // N PAIRS | KEY | VALUE LENGTH | VALUE ..
+            out.writeInt(numberOfKeys);
+            for (Map.Entry<String, byte[]> pair : pairs.entrySet()) {
+                out.writeUTF(pair.getKey());
+                byte[] value = pair.getValue();
+                out.writeInt(value.length);
+                out.write(value);
+            }
+
             return out;
         } catch (IOException e) {
             e.printStackTrace();
             return null;
         }
     }
-    
 
     private void put(String key, byte[] value) {
         lock.writeLock().lock();
@@ -205,9 +245,13 @@ class ServerWorker implements Runnable {
     }
 
     private byte[] get(String key) {
-        return database.database.get(key);
+        lock.readLock().lock();
+        try {
+            return database.database.get(key);
+        } finally {
+            lock.readLock().unlock();
+        }
     }
-
     
     private void multiPut(Map<String, byte[]> pairs) {
         for (Map.Entry<String, byte[]> entry : pairs.entrySet()) {
@@ -216,9 +260,14 @@ class ServerWorker implements Runnable {
     }
 
     private Map<String, byte[]> multiGet(Set<String> keys) {
-        return database.database.entrySet().stream()
-            .filter(entry -> keys.contains(entry.getKey()))
-            .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        Map<String, byte[]> pairs = new HashMap<>();
+        for (String key : keys) {
+            byte[] value = get(key);
+            if (value != null) {
+                pairs.put(key, value);
+            }
+        }
+        return pairs;
     }
 }
 
