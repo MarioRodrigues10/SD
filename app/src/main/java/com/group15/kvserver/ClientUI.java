@@ -8,11 +8,29 @@ public class ClientUI {
         try (Scanner scanner = new Scanner(System.in)) {
             ClientLibrary client = new ClientLibrary("localhost",12345);
 
-            System.out.println("Choose an option: ");
-            System.out.println("1. Register ");
-            System.out.println("2. Log in ");
-            int choice = scanner.nextInt();
-            scanner.nextLine();
+            int choice = 0;
+            boolean validChoice = false;
+            while (!validChoice) {
+                System.out.println("Choose an option: ");
+                System.out.println("1. Register ");
+                System.out.println("2. Log in ");
+                System.out.println("3. Exit");
+
+                try {
+                    choice = scanner.nextInt();
+                    scanner.nextLine();
+                    if (choice == 1 || choice == 2 || choice == 3) {
+                        validChoice = true;
+                    } else {
+                        System.out.println("Invalid option! Please choose 1 to Register, 2 to Log in, or 3 to Exit.");
+                    }
+                } catch (InputMismatchException e) {
+                    System.out.println("Invalid input! Please enter a number (1, 2 or 3).");
+                    scanner.nextLine();
+                }
+            }
+
+            if (choice == 3) return;
 
             System.out.println("Enter your username: ");
             String username = scanner.nextLine();
@@ -23,7 +41,7 @@ public class ClientUI {
             if (choice == 1) {
                 authenticated = client.register(username, password);
             }
-            else if (choice == 2) {
+            else {
                 authenticated = client.authenticate(username, password);
             }
 
@@ -31,14 +49,29 @@ public class ClientUI {
                 System.out.println("You have successfully registered!");
                 boolean running = true;
                 while (running) {
-                    System.out.println("Choose an operation: ");
-                    System.out.println("1. Put");
-                    System.out.println("2. Get");
-                    System.out.println("3. MultiPut");
-                    System.out.println("4. MultiGet");
-                    System.out.println("5. Exit");
-                    int operation = scanner.nextInt();
-                    scanner.nextLine();
+                    int operation = 0;
+                    validChoice = false;
+                    while (!validChoice) {
+                        System.out.println("Choose an operation: ");
+                        System.out.println("1. Put");
+                        System.out.println("2. Get");
+                        System.out.println("3. MultiPut");
+                        System.out.println("4. MultiGet");
+                        System.out.println("5. Exit");
+
+                        try {
+                            operation = scanner.nextInt();
+                            scanner.nextLine();
+                            if (operation >= 1 && operation <= 5) {
+                                validChoice = true;
+                            } else {
+                                System.out.println("Invalid operation! Please choose a valid operation.");
+                            }
+                        } catch (InputMismatchException e) {
+                            System.out.println("Invalid input! Please enter a valid number between 1 and 5.");
+                            scanner.nextLine();
+                        }
+                    }
 
                     switch (operation) {
                         case 1:

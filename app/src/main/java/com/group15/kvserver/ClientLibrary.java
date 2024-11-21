@@ -46,52 +46,71 @@ public class ClientLibrary {
     }
 
     public void put(String key, byte[] value) throws IOException {
-        out.writeShort(RequestType.PutRequest.getValue());
-        out.writeUTF(key);
-        out.writeInt(value.length);
-        out.write(value);
-        out.flush();
+        lock.lock();
+        try {
+            out.writeShort(RequestType.PutRequest.getValue());
+            out.writeUTF(key);
+            out.writeInt(value.length);
+            out.write(value);
+            out.flush();
+        } finally {
+            lock.unlock();
+        }
     }
 
     public byte[] get(String key) throws IOException {
-        out.writeShort(RequestType.GetRequest.getValue());
-        out.writeUTF(key);
-        out.flush();
-        int length = in.readInt();
-        if (length < 0) return null;
-        byte[] data = new byte[length];
-        in.readFully(data);
-        return data;
+        lock.lock();
+        try {
+            out.writeShort(RequestType.GetRequest.getValue());
+            out.writeUTF(key);
+            out.flush();
+            int length = in.readInt();
+            if (length < 0) return null;
+            byte[] data = new byte[length];
+            in.readFully(data);
+            return data;
+        }
+        finally {lock.unlock();}
     }
 
     public void multiPut(Map<String, byte[]> pairs) throws IOException {
-        out.writeShort(RequestType.MultiPutRequest.getValue());
-        out.writeInt(pairs.size());
-        for (Map.Entry<String, byte[]> entry : pairs.entrySet()) {
-            out.writeUTF(entry.getKey());
-            out.writeInt(entry.getValue().length);
-            out.write(entry.getValue());
+        lock.lock();
+        try {
+            out.writeShort(RequestType.MultiPutRequest.getValue());
+            out.writeInt(pairs.size());
+            for (Map.Entry<String, byte[]> entry : pairs.entrySet()) {
+                out.writeUTF(entry.getKey());
+                out.writeInt(entry.getValue().length);
+                out.write(entry.getValue());
+            }
+            out.flush();
         }
-        out.flush();
+        finally {lock.unlock();}
     }
 
     public Map<String, byte[]> multiGet(Set<String> keys) throws IOException {
-        out.writeShort(RequestType.MultiGetRequest.getValue());
-        out.writeInt(keys.size());
-        for (String key : keys) {out.writeUTF(key);}
-        out.flush();
+        lock.lock();
+        try {
+            out.writeShort(RequestType.MultiGetRequest.getValue());
+            out.writeInt(keys.size());
+            for (String key : keys) {
+                out.writeUTF(key);
+            }
+            out.flush();
 
-        int length = in.readInt();
-        if (length < 0) return null;
-        Map<String, byte[]> result = new HashMap<>();
-        for (int i = 0; i < length; i++) {
-            String key = in.readUTF();
-            int valueLen = in.readInt();
-            byte[] value = new byte[valueLen];
-            in.readFully(value);
-            result.put(key, value);
+            int length = in.readInt();
+            if (length < 0) return null;
+            Map<String, byte[]> result = new HashMap<>();
+            for (int i = 0; i < length; i++) {
+                String key = in.readUTF();
+                int valueLen = in.readInt();
+                byte[] value = new byte[valueLen];
+                in.readFully(value);
+                result.put(key, value);
+            }
+            return result;
         }
-        return result;
+        finally {lock.unlock();}
     }
 
     public void close() throws IOException {

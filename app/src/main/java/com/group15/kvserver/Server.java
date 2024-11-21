@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.Set;
+import java.util.concurrent.locks.Condition;
 
 enum RequestType {
     AuthRequest((short)0),
@@ -39,7 +40,7 @@ class ServerDatabase {
     List<ReentrantReadWriteLock> databaseLocks;
     List<ReentrantLock> usersLocks;
 
-    public ServerDatabase(int maxClients, int databaseShardsCount, int usersShardsCount) {
+    public ServerDatabase(int databaseShardsCount, int usersShardsCount) {
         this.databaseShardsCount = databaseShardsCount;
         this.usersShardsCount = usersShardsCount;
         
@@ -100,7 +101,6 @@ class ServerWorker implements Runnable {
                 }
                 catch (EOFException e) {
                     // Client disconnects
-                    System.out.println("Client disconnected.");
                     running = false;
                 }
             }
@@ -111,6 +111,9 @@ class ServerWorker implements Runnable {
         }
         catch (IOException e) {
             e.printStackTrace();
+        }
+        finally {
+            Server.signalClientDisconnection();
         }
     }
 
@@ -287,6 +290,10 @@ class ServerWorker implements Runnable {
 }
 
 public class Server {
+    static int connectedClients = 0;
+    static ReentrantLock lock = new ReentrantLock();
+    static Condition allowClientConnection = lock.newCondition();
+
     public static void main(String[] args) throws IOException {
         List<Integer> arguments = new java.util.ArrayList<>();
 
@@ -303,15 +310,40 @@ public class Server {
             System.out.println("Usage: java Server <max-clients> <database-shards> <user-shards>");
             return;
         }
-
-        ServerDatabase database = new ServerDatabase(arguments.get(0), arguments.get(1), arguments.get(2)); 
+        int maxClients = arguments.get(0);
+        ServerDatabase database = new ServerDatabase(arguments.get(1), arguments.get(2));
         ServerSocket serverSocket = new ServerSocket(12345);
 
         boolean running = true;
         while (running) {
-            Socket socket = serverSocket.accept();
-            Thread worker = new Thread(new ServerWorker(socket, database));
-            worker.start();
+            lock.lock();
+            try {
+                while (connectedClients >= maxClients) {
+                    allowClientConnection.await();
+                }
+
+                Socket socket = serverSocket.accept();
+                connectedClients++;
+                System.out.println("Client connected. Active clients: " + connectedClients);
+                Thread worker = new Thread(new ServerWorker(socket, database));
+                worker.start();
+
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            } finally {lock.unlock();}
         }
     }
+
+    public static void signalClientDisconnection(){
+        lock.lock();
+        try{
+            connectedClients--;
+            allowClientConnection.signalAll();
+            System.out.println("Client disconnected. Connected clients: " + connectedClients);
+        }
+        finally {
+            lock.unlock();
+        }
+    }
+
 }
