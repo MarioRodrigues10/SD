@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.locks.Condition;
 import java.util.Set;
 import java.util.concurrent.locks.Condition;
 
@@ -17,7 +18,8 @@ enum RequestType {
     PutRequest((short)2),
     GetRequest((short)3),
     MultiPutRequest((short)4),
-    MultiGetRequest((short)5);
+    MultiGetRequest((short)5),
+    GetWhenRequest((short)6);
 
     private final short value;
 
@@ -39,6 +41,7 @@ class ServerDatabase {
 
     List<ReentrantReadWriteLock> databaseLocks;
     List<ReentrantLock> usersLocks;
+    Map<String, Condition> conditions;
 
     public ServerDatabase(int databaseShardsCount, int usersShardsCount) {
         this.databaseShardsCount = databaseShardsCount;
@@ -49,6 +52,8 @@ class ServerDatabase {
 
         this.databaseLocks = new java.util.ArrayList<>();
         this.usersLocks = new java.util.ArrayList<>();
+        
+        this.conditions = new HashMap<>(); 
 
         for (int i = 0; i < databaseShardsCount; i++) {
             this.databaseShards.add(new HashMap<>());
@@ -113,6 +118,7 @@ class ServerWorker implements Runnable {
             e.printStackTrace();
         }
         finally {
+            System.out.println("Client disconnected.");
             Server.signalClientDisconnection();
         }
     }
@@ -132,6 +138,8 @@ class ServerWorker implements Runnable {
                     return handleMultiPutRequest(in);
                 case MultiGetRequest:
                     return handleMultiGetRequest(in);
+                case GetWhenRequest:
+                    return handleGetWhenRequest(in);
                 default:
                     return null;
             }
@@ -248,6 +256,27 @@ class ServerWorker implements Runnable {
         return out;
     }
 
+    private DataOutputStream handleGetWhenRequest(DataInputStream in) throws IOException {
+        // Chaves e valores para a condição
+        String key = in.readUTF();
+        String keyCond = in.readUTF();
+        int valueCondLength = in.readInt();
+        byte[] valueCond = new byte[valueCondLength];
+        in.readFully(valueCond);
+
+        byte[] result = getWhen(key, keyCond, valueCond);
+        DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+        if (result != null) {
+            out.writeInt(result.length);
+            out.write(result);
+            return out;
+        }
+        else{
+            out.writeInt(-1);
+            return out;
+        }
+    }
+
     private void put(String key, byte[] value) {
 
         int shardIndex = database.getDatabaseShardIndex(key);
@@ -255,6 +284,7 @@ class ServerWorker implements Runnable {
         try {
             Map<String, byte[]> currentShard = database.databaseShards.get(shardIndex);
             currentShard.put(key, value);
+            updateConditionAndNotify(key);
         } finally {
             database.databaseLocks.get(shardIndex).writeLock().unlock();
         }
@@ -286,6 +316,58 @@ class ServerWorker implements Runnable {
             }
         }
         return pairs;
+    }
+
+    private byte[] getWhen(String key, String keyCond, byte[] valueCond) throws IOException {
+        int shardIndexCond = database.getDatabaseShardIndex(keyCond);
+        ReentrantReadWriteLock lock = database.databaseLocks.get(shardIndexCond);
+        lock.writeLock().lock();
+        try {
+            Map<String, byte[]> currentShardCond = database.databaseShards.get(shardIndexCond);
+            Condition condition = lock.writeLock().newCondition();
+            database.conditions.put(keyCond, condition);
+
+            while (!java.util.Arrays.equals(currentShardCond.get(keyCond), valueCond)) {
+                try {
+                    condition.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        } finally {
+            lock.writeLock().unlock();
+        }
+
+        int shardIndex = database.getDatabaseShardIndex(key);
+        ReentrantReadWriteLock targetLock = database.databaseLocks.get(shardIndex);
+        targetLock.readLock().lock();
+        try {
+            Map<String, byte[]> currentShard = database.databaseShards.get(shardIndex);
+            System.out.println("Teste: " + currentShard.get(key));
+            return currentShard.get(key);
+        } finally {
+            targetLock.readLock().unlock();
+        }
+
+    }
+
+    private void updateConditionAndNotify(String keyCond) {
+        int shardIndexCond = database.getDatabaseShardIndex(keyCond);
+        ReentrantReadWriteLock lock = database.databaseLocks.get(shardIndexCond);
+        lock.writeLock().lock();
+        try {
+            Map<String, byte[]> currentShardCond = database.databaseShards.get(shardIndexCond);
+
+            if (currentShardCond.containsKey(keyCond)) {
+                Condition condition = database.conditions.get(keyCond);
+                System.out.println("Notifying condition for key: " + keyCond);
+                if (condition != null) {
+                    condition.signalAll();
+                }
+            }
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 }
 
@@ -339,7 +421,7 @@ public class Server {
         try{
             connectedClients--;
             allowClientConnection.signalAll();
-            System.out.println("Client disconnected. Connected clients: " + connectedClients);
+            System.out.println("Connected clients: " + connectedClients);
         }
         finally {
             lock.unlock();

@@ -113,6 +113,26 @@ public class ClientLibrary {
         finally {lock.unlock();}
     }
 
+    public byte[] getWhen(String key, String keyCond, byte[] valueCond) throws IOException {
+        lock.lock();
+        try {
+            out.writeShort(RequestType.GetWhenRequest.getValue());
+            out.writeUTF(key);
+            out.writeUTF(keyCond);
+            out.writeInt(valueCond.length);
+            out.write(valueCond);
+            out.flush();
+
+            int length = in.readInt();
+            if (length < 0) return null;
+            byte[] data = new byte[length];
+            in.readFully(data);
+            return data;
+        } finally {
+            lock.unlock();
+        }
+    }
+
     public void close() throws IOException {
         in.close();
         out.close();

@@ -57,12 +57,13 @@ public class ClientUI {
                         System.out.println("2. Get");
                         System.out.println("3. MultiPut");
                         System.out.println("4. MultiGet");
-                        System.out.println("5. Exit");
+                        System.out.println("5. GetWhen");
+                        System.out.println("6. Exit");
 
                         try {
                             operation = scanner.nextInt();
                             scanner.nextLine();
-                            if (operation >= 1 && operation <= 5) {
+                            if (operation >= 1 && operation <= 6) {
                                 validChoice = true;
                             } else {
                                 System.out.println("Invalid operation! Please choose a valid operation.");
@@ -121,6 +122,17 @@ public class ClientUI {
                             break;
 
                         case 5:
+                            System.out.println("Key: ");
+                            key = scanner.nextLine();
+                            System.out.println("Condition Key: ");
+                            String keyCond = scanner.nextLine();
+                            System.out.println("Condition Value: ");
+                            byte[] valueCond = scanner.nextLine().getBytes();
+                            byte[] resultValue = client.getWhen(key, keyCond, valueCond);
+                            System.out.println(resultValue != null ? new String(resultValue) : "Key not found.");
+                            break;
+
+                        case 6:
                             running = false;
                             break;
 
