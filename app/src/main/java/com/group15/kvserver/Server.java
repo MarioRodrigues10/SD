@@ -42,6 +42,7 @@ class ServerDatabase {
     List<ReentrantReadWriteLock> databaseLocks;
     List<ReentrantLock> usersLocks;
     Map<String, Condition> conditions;
+    ReentrantLock globalLock = new ReentrantLock();
 
     public ServerDatabase(int databaseShardsCount, int usersShardsCount) {
         this.databaseShardsCount = databaseShardsCount;
@@ -302,19 +303,72 @@ class ServerWorker implements Runnable {
     }
     
     private void multiPut(Map<String, byte[]> pairs) {
+        Map<Integer, Map<String, byte[]>> pairsByShard = new java.util.HashMap<>();
         for (Map.Entry<String, byte[]> entry : pairs.entrySet()) {
-            put(entry.getKey(), entry.getValue());
+            String key = entry.getKey();
+            int shardIndex = database.getDatabaseShardIndex(key);
+            if (!pairsByShard.containsKey(shardIndex)) {
+                pairsByShard.put(shardIndex, new java.util.HashMap<>());
+            }
+            pairsByShard.get(shardIndex).put(key, entry.getValue());
+        }
+
+        database.globalLock.lock();
+        try {
+            for(Map.Entry<Integer, Map<String, byte[]>> shardPairs : pairsByShard.entrySet()) {
+                int shardIndex = shardPairs.getKey();
+                database.databaseLocks.get(shardIndex).writeLock().lock();
+            }
+        } finally {
+            database.globalLock.unlock();
+        }
+
+        for(Map.Entry<Integer, Map<String, byte[]>> shardPairs : pairsByShard.entrySet()) {
+            int shardIndex = shardPairs.getKey();
+            Map<String, byte[]> currentShard = database.databaseShards.get(shardIndex);
+            Map<String, byte[]> par = shardPairs.getValue();
+            for (Map.Entry<String, byte[]> entry : par.entrySet()) {
+                String key = entry.getKey();
+                byte[] value = entry.getValue();
+                currentShard.put(key, value);
+                updateConditionAndNotify(key);
+            }
+            database.databaseLocks.get(shardIndex).writeLock().unlock();
         }
     }
 
     private Map<String, byte[]> multiGet(Set<String> keys) {
-        Map<String, byte[]> pairs = new HashMap<>();
+        Map<String, byte[]> pairs = new java.util.HashMap<>();
+        Map<Integer, List<String>> keysByShard = new java.util.HashMap<>();
         for (String key : keys) {
-            byte[] value = get(key);
-            if (value != null) {
-                pairs.put(key, value);
+            int shardIndex = database.getDatabaseShardIndex(key);
+            if (!keysByShard.containsKey(shardIndex)) {
+                keysByShard.put(shardIndex, new java.util.ArrayList<>());
+            }
+            keysByShard.get(shardIndex).add(key);
+        }
+
+        database.globalLock.lock();
+        try{
+            for (Map.Entry<Integer, List<String>> entry : keysByShard.entrySet()) {
+                int shardIndex = entry.getKey();
+                database.databaseLocks.get(shardIndex).readLock().lock();
             }
         }
+        finally {
+            database.globalLock.unlock();
+        }
+
+        for(Map.Entry<Integer, List<String>> shardKeys : keysByShard.entrySet()) {
+            int shardIndex = shardKeys.getKey();
+            List<String> keysByShardList = shardKeys.getValue();
+            Map<String, byte[]> currentShard = database.databaseShards.get(shardIndex);
+            for (String key : keysByShardList) {
+                pairs.put(key, currentShard.get(key));
+            }
+            database.databaseLocks.get(shardIndex).readLock().unlock();
+        }
+        
         return pairs;
     }
 
