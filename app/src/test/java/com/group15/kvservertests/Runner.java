@@ -1,8 +1,5 @@
 package com.group15.kvservertests;
 
-import com.group15.kvserver.ClientLibrary;
-import com.group15.kvserver.utils.Logger;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -22,6 +19,8 @@ import org.jfree.chart.title.TextTitle;
 import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYSeriesCollection;
 
+import com.group15.kvserver.ClientLibrary;
+import com.group15.kvserver.utils.Logger;
 
 public class Runner {
     private static final String HOST = "localhost";
@@ -92,7 +91,15 @@ public class Runner {
         
         Logger.log("Populating database.", Logger.LogLevel.INFO);
         for (int i = 1; i <= 1000; i++) {
-            put("key" + i, ("value" + i).getBytes());
+            int finalI = i;
+            Thread put = new Thread(() -> {
+                try {
+                    put("key" + finalI, ("value" + finalI).getBytes());
+                } catch (IOException e) {
+                    System.out.println("Error during put operation: " + e.getMessage());
+                }
+            });
+            put.start();
         }
 
         for (int i = 1; i <= 1000; i++) {
@@ -101,28 +108,35 @@ public class Runner {
             final long workloadStartTime = System.currentTimeMillis();
             executorService.submit(() -> {
                 try {
-                    long startTime = System.nanoTime();
-                    byte[] returnedValue = get(key);
-                    long endTime = System.nanoTime();
-                    long duration = endTime - startTime;
-                    long timestamp = System.currentTimeMillis() - workloadStartTime;
-
-                    // Verify the value
-                    if (returnedValue != null) {
-                        if (!value.equals(new String(returnedValue))) {
-                            Logger.log("Value mismatch for key " + key, Logger.LogLevel.ERROR);
+                    Thread getThread = new Thread(() -> {
+                        try {
+                            long startTime = System.nanoTime();
+                            byte[] returnedValue = get(key);
+                            long endTime = System.nanoTime();
+                            long duration = endTime - startTime;
+                            long timestamp = System.currentTimeMillis() - workloadStartTime;
+    
+                            if (returnedValue != null) {
+                                if (!value.equals(new String(returnedValue))) {
+                                    Logger.log("Value mismatch for key " + key, Logger.LogLevel.ERROR);
+                                }
+                            }
+    
+                            datapointsLock.lock();
+                            try {
+                                responseTimes.add(duration);
+                                timestamps.add(timestamp);
+                            } finally {
+                                datapointsLock.unlock();
+                            }
+                        } catch (IOException e) {
+                            Logger.log("Get failed for key " + key + ": " + e.getMessage(), Logger.LogLevel.ERROR);
                         }
-                    }
-
-                    datapointsLock.lock();
-                    try {
-                        responseTimes.add(duration);
-                        timestamps.add(timestamp);
-                    } finally {
-                        datapointsLock.unlock();
-                    }
-                } catch (IOException e) {
-                    Logger.log("Get failed for key " + key + ": " + e.getMessage(), Logger.LogLevel.ERROR);
+                    });
+    
+                    getThread.start();
+                } catch (Exception e) {
+                    Logger.log("Error during get operation for key " + key + ": " + e.getMessage(), Logger.LogLevel.ERROR);
                 }
             });
         }
@@ -135,7 +149,7 @@ public class Runner {
         } catch (InterruptedException e) {
             executorService.shutdownNow();
         }
-
+    
         generateGraph(responseTimes, timestamps, "Get Operation Response time over time for a Server with " + numBuckets + " bucket(s) and " + maxClients + " client(s)", "1000 random key value pairs");
     }
 
@@ -148,7 +162,15 @@ public class Runner {
         ReentrantLock datapointsLock = new ReentrantLock();
         
         Logger.log("Populating database.", Logger.LogLevel.INFO);
-        put("key", ("value").getBytes());
+
+        Thread put = new Thread(() -> {
+            try {
+                put("key", ("value").getBytes());
+            } catch (IOException e) {
+                System.out.println("Error during put operation: " + e.getMessage());
+            }
+        });
+        put.start();
 
         for (int i = 1; i <= 1000; i++) {
             final String key = "key";
@@ -156,28 +178,35 @@ public class Runner {
             final long workloadStartTime = System.currentTimeMillis();
             executorService.submit(() -> {
                 try {
-                    long startTime = System.nanoTime();
-                    byte[] returnedValue = get(key);
-                    long endTime = System.nanoTime();
-                    long duration = endTime - startTime;
-                    long timestamp = System.currentTimeMillis() - workloadStartTime;
-
-                    // Verify the value
-                    if (returnedValue != null) {
-                        if (!value.equals(new String(returnedValue))) {
-                            Logger.log("Value mismatch for key " + key, Logger.LogLevel.ERROR);
+                    Thread getThread = new Thread(() -> {
+                        try {
+                            long startTime = System.nanoTime();
+                            byte[] returnedValue = get(key);
+                            long endTime = System.nanoTime();
+                            long duration = endTime - startTime;
+                            long timestamp = System.currentTimeMillis() - workloadStartTime;
+    
+                            if (returnedValue != null) {
+                                if (!value.equals(new String(returnedValue))) {
+                                    Logger.log("Value mismatch for key " + key, Logger.LogLevel.ERROR);
+                                }
+                            }
+    
+                            datapointsLock.lock();
+                            try {
+                                responseTimes.add(duration);
+                                timestamps.add(timestamp);
+                            } finally {
+                                datapointsLock.unlock();
+                            }
+                        } catch (IOException e) {
+                            Logger.log("Get failed for key " + key + ": " + e.getMessage(), Logger.LogLevel.ERROR);
                         }
-                    }
-
-                    datapointsLock.lock();
-                    try {
-                        responseTimes.add(duration);
-                        timestamps.add(timestamp);
-                    } finally {
-                        datapointsLock.unlock();
-                    }
-                } catch (IOException e) {
-                    Logger.log("Get failed for key " + key + ": " + e.getMessage(), Logger.LogLevel.ERROR);
+                    });
+    
+                    getThread.start();
+                } catch (Exception e) {
+                    Logger.log("Error during get operation for key " + key + ": " + e.getMessage(), Logger.LogLevel.ERROR);
                 }
             });
         }
@@ -204,7 +233,15 @@ public class Runner {
         
         Logger.log("Populating database.", Logger.LogLevel.INFO);
         for (int i = 1; i <= 1000; i++) {
-            put("key" + i, ("value" + i).getBytes());
+            int finalI = i;
+            Thread put = new Thread(() -> {
+                try {
+                    put("key" + finalI, ("value" + finalI).getBytes());
+                } catch (IOException e) {
+                    System.out.println("Error during put operation: " + e.getMessage());
+                }
+            });
+            put.start();
         }
 
         for (int i = 1; i <= 100; i++) {
@@ -212,36 +249,44 @@ public class Runner {
             final long workloadStartTime = System.currentTimeMillis();
             executorService.submit(() -> {
                 try {
-                    long startTime = System.nanoTime();
-                    Set<String> keys = new HashSet<>();
-                    for (int j = 1; j <= 10; j++) {
-                        keys.add("key" + (currentIteration * j));
-                    }
-                    Map<String, byte[]> returnedValues = multiGet(keys);
-                    long endTime = System.nanoTime();
-                    long duration = endTime - startTime;
-                    long timestamp = System.currentTimeMillis() - workloadStartTime;
-
-                    // Verify the values
-                    for (Map.Entry<String, byte[]> entry : returnedValues.entrySet()) {
-                        String key = entry.getKey();
-                        byte[] value = entry.getValue();
-                        if (value != null) {
-                            if (!("value" + key.substring(3)).equals(new String(value))) {
-                                Logger.log("Value mismatch for key " + key, Logger.LogLevel.ERROR);
+                    Thread multiGetThread = new Thread(() -> {
+                        try {
+                            Set<String> keys = new HashSet<>();
+                            for (int j = 1; j <= 10; j++) {
+                                keys.add("key" + (currentIteration * j));
                             }
+    
+                            long startTime = System.nanoTime();
+                            Map<String, byte[]> returnedValues = multiGet(keys);
+                            long endTime = System.nanoTime();
+                            long duration = endTime - startTime;
+                            long timestamp = System.currentTimeMillis() - workloadStartTime;
+    
+                            for (Map.Entry<String, byte[]> entry : returnedValues.entrySet()) {
+                                String key = entry.getKey();
+                                byte[] value = entry.getValue();
+                                if (value != null) {
+                                    if (!("value" + key.substring(3)).equals(new String(value))) {
+                                        Logger.log("Value mismatch for key " + key, Logger.LogLevel.ERROR);
+                                    }
+                                }
+                            }
+    
+                            datapointsLock.lock();
+                            try {
+                                responseTimes.add(duration);
+                                timestamps.add(timestamp);
+                            } finally {
+                                datapointsLock.unlock();
+                            }
+                        } catch (IOException e) {
+                            Logger.log("MultiGet failed: " + e.getMessage(), Logger.LogLevel.ERROR);
                         }
-                    }
-
-                    datapointsLock.lock();
-                    try {
-                        responseTimes.add(duration);
-                        timestamps.add(timestamp);
-                    } finally {
-                        datapointsLock.unlock();
-                    }
-                } catch (IOException e) {
-                    Logger.log("MultiGet failed: " + e.getMessage(), Logger.LogLevel.ERROR);
+                    });
+    
+                    multiGetThread.start();
+                } catch (Exception e) {
+                    Logger.log("Error during multiGet operation: " + e.getMessage(), Logger.LogLevel.ERROR);
                 }
             });
         }
@@ -267,43 +312,53 @@ public class Runner {
         ReentrantLock datapointsLock = new ReentrantLock();
         
         Logger.log("Populating database.", Logger.LogLevel.INFO);
-        put("key", ("value").getBytes());
-
+        Thread put = new Thread(() -> {
+            try {
+                put("key", ("value").getBytes());
+            } catch (IOException e) {
+                System.out.println("Error during put operation: " + e.getMessage());
+            }
+        });
+        put.start();
+    
         for (int i = 1; i <= 100; i++) {
             final long workloadStartTime = System.currentTimeMillis();
             executorService.submit(() -> {
-                try {
-                    long startTime = System.nanoTime();
-                    Set<String> keys = new HashSet<>();
-                    for (int j = 1; j <= 10; j++) {
-                        keys.add("key");
-                    }
-                    Map<String, byte[]> returnedValues = multiGet(keys);
-                    long endTime = System.nanoTime();
-                    long duration = endTime - startTime;
-                    long timestamp = System.currentTimeMillis() - workloadStartTime;
-
-                    // Verify the values
-                    for (Map.Entry<String, byte[]> entry : returnedValues.entrySet()) {
-                        String key = entry.getKey();
-                        byte[] value = entry.getValue();
-                        if (value != null) {
-                            if (!("value".equals(new String(value)))) {
-                                Logger.log("Value mismatch for key " + key, Logger.LogLevel.ERROR);
+                Thread multiGetThread = new Thread(() -> {
+                    try {
+                        Set<String> keys = new HashSet<>();
+                        for (int j = 1; j <= 10; j++) {
+                            keys.add("key");
+                        }
+    
+                        long startTime = System.nanoTime();
+                        Map<String, byte[]> returnedValues = multiGet(keys);
+                        long endTime = System.nanoTime();
+                        long duration = endTime - startTime;
+                        long timestamp = System.currentTimeMillis() - workloadStartTime;
+    
+                        for (Map.Entry<String, byte[]> entry : returnedValues.entrySet()) {
+                            String key = entry.getKey();
+                            byte[] value = entry.getValue();
+                            if (value != null) {
+                                if (!("value".equals(new String(value)))) {
+                                    Logger.log("Value mismatch for key " + key, Logger.LogLevel.ERROR);
+                                }
                             }
                         }
+    
+                        datapointsLock.lock();
+                        try {
+                            responseTimes.add(duration);
+                            timestamps.add(timestamp);
+                        } finally {
+                            datapointsLock.unlock();
+                        }
+                    } catch (IOException e) {
+                        Logger.log("MultiGet failed: " + e.getMessage(), Logger.LogLevel.ERROR);
                     }
-
-                    datapointsLock.lock();
-                    try {
-                        responseTimes.add(duration);
-                        timestamps.add(timestamp);
-                    } finally {
-                        datapointsLock.unlock();
-                    }
-                } catch (IOException e) {
-                    Logger.log("MultiGet failed: " + e.getMessage(), Logger.LogLevel.ERROR);
-                }
+                });
+                multiGetThread.start();
             });
         }
 

@@ -1,12 +1,19 @@
 package com.group15.kvserver;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.InputMismatchException;
+import java.util.List;
+import java.util.Map;
+import java.util.Scanner;
+import java.util.Set;
 
 public class ClientUI {
     public static void main(String[] args) {
         try (Scanner scanner = new Scanner(System.in)) {
-            ClientLibrary client = new ClientLibrary("localhost",12345);
+            ClientLibrary client = new ClientLibrary("localhost", 12345);
 
             int choice = 0;
             boolean validChoice = false;
@@ -30,24 +37,51 @@ public class ClientUI {
                 }
             }
 
-            if (choice == 3) return;
+            if (choice == 3) {
+                client.close();
+                return;
+            }
 
             System.out.println("Enter your username: ");
             String username = scanner.nextLine();
             System.out.println("Enter your password: ");
             String password = scanner.nextLine();
 
-            boolean authenticated = false;
-            if (choice == 1) {
-                authenticated = client.register(username, password);
-            }
-            else {
-                authenticated = client.authenticate(username, password);
+            final boolean[] authenticated = new boolean[1];
+            final int finalChoice = choice;
+            Thread authThread = new Thread(() -> {
+                if (finalChoice == 1) {
+                    try {
+                        authenticated[0] = client.register(username, password);
+                    } catch (IOException e) {
+                        System.out.println("Error during registration: " + e.getMessage());
+                        authenticated[0] = false;
+                    }
+                } else {
+                    try {
+                        authenticated[0] = client.authenticate(username, password);
+                    } catch (IOException e) {
+                        System.out.println("Error during authentication: " + e.getMessage());
+                        authenticated[0] = false;
+                    }
+                }
+            });
+            
+            authThread.start();
+
+            try {
+                authThread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.out.println("Thread interrupted during authentication.");
+                return;
             }
 
-            if (authenticated) {
+            if (authenticated[0]) {
                 System.out.println("You have successfully registered!");
                 boolean running = true;
+                List<Thread> threads = new ArrayList<>();
+
                 while (running) {
                     int operation = 0;
                     validChoice = false;
@@ -76,18 +110,34 @@ public class ClientUI {
 
                     switch (operation) {
                         case 1:
-                            System.out.println("Key: ");
-                            String key = scanner.nextLine();
-                            System.out.println("Value: ");
-                            byte[] value = scanner.nextLine().getBytes();
-                            client.put(key, value);
-                            break;
+                        System.out.println("Key: ");
+                        final String key = scanner.nextLine();
+                        System.out.println("Value: ");
+                        final byte[] value = scanner.nextLine().getBytes();
+                        Thread put = new Thread(() -> {
+                            try {
+                                client.put(key, value);
+                            } catch (IOException e) {
+                                System.out.println("Error during put operation: " + e.getMessage());
+                            }
+                        });
+                        put.start();
+                        threads.add(put);
+                        break;
 
                         case 2:
                             System.out.println("Key: ");
-                            key = scanner.nextLine();
-                            value = client.get(key);
-                            System.out.println(value != null ? new String(value) : "Chave não encontrada.");
+                            String getKey = scanner.nextLine();
+                            Thread get = new Thread(() -> {
+                                try {
+                                    byte[] result = client.get(getKey);
+                                    System.out.println("Get operation: Key = " + getKey + ", Value = " + (result != null ? new String(result) : "Key not found."));
+                                } catch (IOException e) {
+                                    System.out.println("Error during get operation: " + e.getMessage());
+                                }
+                            });
+                            get.start();
+                            threads.add(get);
                             break;
 
                         case 3:
@@ -97,12 +147,20 @@ public class ClientUI {
                             Map<String, byte[]> map = new HashMap<>();
                             for (int i = 0; i < n; i++) {
                                 System.out.println("Key: ");
-                                key = scanner.nextLine();
+                                final String key1 = scanner.nextLine();
                                 System.out.println("Value: ");
-                                value = scanner.nextLine().getBytes();
-                                map.put(key, value);
+                                final byte[] value1 = scanner.nextLine().getBytes();
+                                map.put(key1, value1);
                             }
-                            client.multiPut(map);
+                            Thread multiPut = new Thread(() -> {
+                                try {
+                                    client.multiPut(map);
+                                } catch (IOException e) {
+                                    System.out.println("Error during multiPut operation: " + e.getMessage());
+                                }
+                            });
+                            multiPut.start();
+                            threads.add(multiPut);
                             break;
 
                         case 4:
@@ -112,27 +170,50 @@ public class ClientUI {
                             Set<String> keys = new HashSet<>();
                             for (int i = 0; i < n; i++) {
                                 System.out.println("Key: ");
-                                key = scanner.nextLine();
-                                keys.add(key);
+                                final String key2 = scanner.nextLine();
+                                keys.add(key2);
                             }
-                            Map<String,byte[]> result = client.multiGet(keys);
-                            for (Map.Entry<String, byte[]> entry : result.entrySet()) {
-                                System.out.println(entry.getKey() + " : " + new String(entry.getValue()));
-                            }
+                            Thread multiGet = new Thread(() -> {
+                                try {
+                                    Map<String, byte[]> resultMap = client.multiGet(keys);
+                                    for (Map.Entry<String, byte[]> entry : resultMap.entrySet()) {
+                                        System.out.println("MultiGet operation: Key = " + entry.getKey() + ", Value = " + new String(entry.getValue()));
+                                    }
+                                } catch (IOException e) {
+                                    System.out.println("Error during multiGet operation: " + e.getMessage());
+                                }
+                            });
+                            multiGet.start();
+                            threads.add(multiGet);
                             break;
 
                         case 5:
                             System.out.println("Key: ");
-                            key = scanner.nextLine();
+                            final String key3 = scanner.nextLine();
                             System.out.println("Condition Key: ");
                             String keyCond = scanner.nextLine();
                             System.out.println("Condition Value: ");
                             byte[] valueCond = scanner.nextLine().getBytes();
-                            byte[] resultValue = client.getWhen(key, keyCond, valueCond);
-                            System.out.println(resultValue != null ? new String(resultValue) : "Key not found.");
+                            Thread condition = new Thread(() -> {
+                                try {
+                                    byte[] resultValue = client.getWhen(key3, keyCond, valueCond);
+                                    System.out.println("GetWhen operation: Key = " + key3 + ", Condition Key = " + keyCond + ", Result Value = " + (resultValue != null ? new String(resultValue) : "Key not found."));
+                                } catch (IOException e) {
+                                    System.out.println("Error during getWhen operation: " + e.getMessage());
+                                }
+                            });
+                            condition.start();
+                            threads.add(condition);
                             break;
 
                         case 6:
+                            System.out.println("Disconnecting...");
+                            try{
+                                client.sendDisconnectMessage();
+                            }
+                            catch (IOException e){
+                                System.out.println("Error during disconnect: " + e.getMessage());
+                            }
                             running = false;
                             break;
 
@@ -141,10 +222,20 @@ public class ClientUI {
                             break;
                     }
                 }
+                System.out.println("Closing threads...");
+                for (Thread t : threads) {
+                    try {
+                        t.join();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        System.out.println("Thread interrupted.");
+                    }
+                }
+                System.out.println("Bye.");
+
             } else {
                 System.out.println("Authentication failed!");
             }
-            client.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
