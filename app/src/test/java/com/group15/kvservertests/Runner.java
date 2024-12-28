@@ -28,6 +28,11 @@ public class Runner {
     public int numBuckets;
     public int maxClients;
 
+    /**
+     * Main entry point for the application.
+     * Initializes the environment, takes user input for server configuration,
+     * and runs the selected workload.
+     */
     public static void main(String[] args) {
         try {
             Runner runner = new Runner();
@@ -70,6 +75,10 @@ public class Runner {
         }
     }
 
+    /**
+     * Initializes the environment by checking if the server is reachable.
+     * @return true if server is reachable, false otherwise
+     */
     public boolean init() throws IOException {
         try {
             ClientLibrary client = new ClientLibrary(HOST, PORT);
@@ -81,6 +90,10 @@ public class Runner {
         }
     }
 
+    /**
+     * Workload 1: Runs 1000 get operations on random key-value pairs.
+     * This tests the server's ability to handle a large number of random key lookups.
+     */
     public void workload1() throws IOException {
         Logger.log("Running workload 1", Logger.LogLevel.INFO);
 
@@ -153,6 +166,9 @@ public class Runner {
         generateGraph(responseTimes, timestamps, "Get Operation Response time over time for a Server with " + numBuckets + " bucket(s) and " + maxClients + " client(s)", "1000 random key value pairs");
     }
 
+    /**
+     * Workload 2: Runs 1000 get operations on the same key to test hotspot behavior.
+     */
     public void workload2() throws IOException {
         Logger.log("Running workload 2", Logger.LogLevel.INFO);
 
@@ -223,6 +239,9 @@ public class Runner {
         generateGraph(responseTimes, timestamps, "Get Operation Response time over time for a Server with " + numBuckets + " bucket(s) and " + maxClients + " client(s)", "1000 get operations on the same key (testing hotspot behaviour)");
     }
 
+    /**
+     * Workload 3: Runs 100 multiget operations with 10 keys each.
+     */
     public void workload3() throws IOException {
         Logger.log("Running workload 3", Logger.LogLevel.INFO);
 
@@ -303,6 +322,9 @@ public class Runner {
         generateGraph(responseTimes, timestamps, "MultiGet Operation Response time over time for a Server with " + numBuckets + " bucket(s) and " + maxClients + " client(s)", "1000 random key value pairs, 10 keys per multiget");
     }
 
+    /**
+     * Workload 4: Runs 100 multiget operations on the same key with 10 keys each.
+     */
     public void workload4() throws IOException {
         Logger.log("Running workload 4", Logger.LogLevel.INFO);
 
@@ -374,6 +396,9 @@ public class Runner {
         generateGraph(responseTimes, timestamps, "MultiGet Operation Response time over time for a Server with " + numBuckets + " bucket(s) and " + maxClients + " client(s)", "100 multiget operations on the same key (10 keys per multiget)");
     }
 
+    /**
+     * Performs a put operation to store a key-value pair in the server.
+     */
     public void put(String key, byte[] value) throws IOException {
         ClientLibrary client = new ClientLibrary(HOST, PORT);
         try {
@@ -384,6 +409,9 @@ public class Runner {
         }
     }
 
+    /**
+     * Performs a get operation to retrieve the value of a key.
+     */
     public byte[] get(String key) throws IOException {
         ClientLibrary client = new ClientLibrary(HOST, PORT);
         try {
@@ -397,6 +425,9 @@ public class Runner {
         return null;
     }
 
+    /**
+     * Performs a multi-get operation to retrieve values for a set of keys.
+     */
     public Map<String, byte[]> multiGet(Set<String> keys) throws IOException {
         ClientLibrary client = new ClientLibrary(HOST, PORT);
         try {
@@ -410,6 +441,9 @@ public class Runner {
         return null;
     } 
 
+    /**
+     * Generates a graph showing the response times over time.
+     */
     public void generateGraph(List<Long> responseTimes, List<Long> timestamps, String title, String subtitle) {
         XYSeries series = new XYSeries("Response Time");
     

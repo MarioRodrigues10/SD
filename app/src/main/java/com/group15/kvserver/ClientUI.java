@@ -11,12 +11,21 @@ import java.util.Scanner;
 import java.util.Set;
 
 public class ClientUI {
+    /**
+     * The main entry point for the ClientUI application.
+     * This method sets up the user interface for interacting with the key-value server,
+     * allowing users to register, authenticate, and perform operations like put, get, multiPut, multiGet, and getWhen.
+     * 
+     * @param args Command-line arguments (unused in this implementation).
+     */
     public static void main(String[] args) {
         try (Scanner scanner = new Scanner(System.in)) {
+            // Create a client library instance that connects to the server at localhost:12345
             ClientLibrary client = new ClientLibrary("localhost", 12345);
 
             int choice = 0;
             boolean validChoice = false;
+            // Display initial menu for user choice: register, login, or exit
             while (!validChoice) {
                 System.out.println("Choose an option: ");
                 System.out.println("1. Register ");
@@ -37,6 +46,7 @@ public class ClientUI {
                 }
             }
 
+            // If the user chooses to exit, close the client connection and exit
             if (choice == 3) {
                 client.close();
                 return;
@@ -49,6 +59,7 @@ public class ClientUI {
 
             final boolean[] authenticated = new boolean[1];
             final int finalChoice = choice;
+            // Create a new thread to handle authentication or registration
             Thread authThread = new Thread(() -> {
                 if (finalChoice == 1) {
                     try {
@@ -77,6 +88,7 @@ public class ClientUI {
                 return;
             }
 
+            // If authentication is successful, proceed with operations
             if (authenticated[0]) {
                 System.out.println("You have successfully registered!");
                 boolean running = true;

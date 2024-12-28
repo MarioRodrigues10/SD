@@ -18,6 +18,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.group15.kvserver.utils.Logger;
 
+/**
+ * Enum representing different types of requests handled by the server.
+ */
 enum RequestType {
     AuthRequest((short)0),
     RegisterRequest((short)1),
@@ -39,18 +42,30 @@ enum RequestType {
     }
 }
 
+/**
+ * A class representing the server's database, including methods for handling sharding and locks.
+ */
 class ServerDatabase {
     int databaseShardsCount;
     int usersShardsCount;
 
+    /* Stores data for different database shards */
     List<Map<String, byte[]>> databaseShards;
+    /* Stores user data for different user shards */
     List<Map<String, String>> usersShards;
 
+    /* Locks for database shards */
     List<ReentrantReadWriteLock> databaseLocks;
+    /* Locks for user shards */
     List<ReentrantLock> usersLocks;
+    /* Conditions to notify */
     Map<String, Condition> conditions;
+    /* Global lock for managing concurrency */
     ReentrantLock globalLock = new ReentrantLock();
 
+    /**
+     * Constructor initializes the server database with the specified number of shards.
+     */
     public ServerDatabase(int databaseShardsCount, int usersShardsCount) {
         this.databaseShardsCount = databaseShardsCount;
         this.usersShardsCount = usersShardsCount;
@@ -74,21 +89,34 @@ class ServerDatabase {
         }
     }
 
+    /**
+     * Calculates the shard index for a given key based on the hash of the key.
+     */
     public int getDatabaseShardIndex(String key) {
         return Math.abs(key.hashCode()) % databaseShardsCount;
     }
 
+    /**
+     * Calculates the shard index for a given user based on the hash of the username.
+     */
     public int getUsersShardIndex(String key) {
         return Math.abs(key.hashCode()) % usersShardsCount;
     }
 }
 
+/**
+ * A class that represents a worker that handles communication with a client.
+ * This class handles the logic for processing different requests sent by the client.
+ */
 class ServerWorker implements Runnable {
     private Socket socket;
     private ServerDatabase database;
     private final Demultiplexer demultiplexer;
     private Map<Condition, List<Integer>> conditionsTags = new HashMap<>();
 
+    /**
+     * Constructor initializes the worker with the client's socket and server database.
+     */
     public ServerWorker(Socket socket, ServerDatabase database) throws IOException {
         this.demultiplexer = new Demultiplexer(new TaggedConnection(socket));
         this.database = database;
@@ -107,6 +135,7 @@ class ServerWorker implements Runnable {
 
                 TaggedConnection.Frame frame = new TaggedConnection.Frame(0, (short)0, new byte[0]);
                 try {
+                    // Receive a request frame from the client
                     frame = demultiplexer.receiveAny();
                 } catch (InterruptedException e) {
                     Logger.log(e.getMessage(), Logger.LogLevel.ERROR);
@@ -154,6 +183,9 @@ class ServerWorker implements Runnable {
         }
     }
 
+    /**
+     * Handles different types of requests from the client and returns the appropriate response.
+     */
     public byte[] handleRequest(RequestType requestType, DataInputStream in, int tag){
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -193,6 +225,12 @@ class ServerWorker implements Runnable {
         }
     }
 
+    /*
+     * Handles an authentication request from the client.
+     * 
+     * @param in The input stream to read the request from.
+     * @param out The output stream to write the response to.
+     */
     private void handleAuthRequest(DataInputStream in, DataOutputStream out) throws IOException {
         String username = in.readUTF();
         String password = in.readUTF();
@@ -209,6 +247,12 @@ class ServerWorker implements Runnable {
         }
     }
 
+    /*
+     * Handles a registration request from the client.
+     * 
+     * @param in The input stream to read the request from.
+     * @param out The output stream to write the response to.
+     */
     private void handleRegisterRequest(DataInputStream in, DataOutputStream out) throws IOException {
         String username = in.readUTF();
         String password = in.readUTF();
@@ -227,6 +271,12 @@ class ServerWorker implements Runnable {
         }
     }
 
+    /*
+     * Handles a put request from the client.
+     * 
+     * @param in The input stream to read the request from.
+     * @param out The output stream to write the response to.
+     */
     private void handlePutRequest(DataInputStream in, DataOutputStream out) throws IOException{
         String key = in.readUTF();
         int valueLength = in.readInt();
@@ -236,6 +286,12 @@ class ServerWorker implements Runnable {
         put(key, value);
     }
 
+    /*
+     * Handles a get request from the client.
+     * 
+     * @param in The input stream to read the request from.
+     * @param out The output stream to write the response to.
+     */
     private void handleGetRequest(DataInputStream in, DataOutputStream out) throws IOException{
         // KEY
         String key = in.readUTF();
@@ -246,6 +302,12 @@ class ServerWorker implements Runnable {
         out.write(value);
     }
 
+    /*
+     * Handles a multi-put request from the client.
+     * 
+     * @param in The input stream to read the request from.
+     * @param out The output stream to write the response to.
+     */
     private void handleMultiPutRequest(DataInputStream in, DataOutputStream out) throws IOException {
         // N PAIRS | KEY | VALUE LENGTH | VALUE | KEY | VALUE LENGTH | VALUE | ...
         int numberOfPairs = in.readInt();
@@ -262,6 +324,12 @@ class ServerWorker implements Runnable {
         multiPut(pairs);
     }
 
+    /*
+     * Handles a multi-get request from the client.
+     * 
+     * @param in The input stream to read the request from.
+     * @param out The output stream to write the response to.
+     */
     private void handleMultiGetRequest(DataInputStream in, DataOutputStream out) throws IOException {
         // N KEYS | KEY | ...
         int numberOfKeys = in.readInt();
@@ -282,6 +350,14 @@ class ServerWorker implements Runnable {
         }
     }
 
+    /*
+     * Handles a get-when request from the client.
+     * 
+     * @param in The input stream to read the request from.
+     * @param out The output stream to write the response to.
+     * @param tag The tag associated with the request.
+     * @return 0 if the request was successful, -1 otherwise.
+     */
     private int handleGetWhenRequest(DataInputStream in, DataOutputStream out, int tag) throws IOException {
         // Chaves e valores para a condição
         String key = in.readUTF();
@@ -314,6 +390,12 @@ class ServerWorker implements Runnable {
         }
     }
 
+    /**
+     * Puts a key-value pair into the database.
+     * 
+     * @param key The key to store.
+     * @param value The value to store.
+     */
     private void put(String key, byte[] value) {
 
         int shardIndex = database.getDatabaseShardIndex(key);
@@ -327,6 +409,12 @@ class ServerWorker implements Runnable {
         }
     }
 
+    /**
+     * Gets the value associated with a key from the database.
+     * 
+     * @param key The key to retrieve.
+     * @return The value associated with the key.
+     */
     private byte[] get(String key) {
         int shardIndex = database.getDatabaseShardIndex(key);
         database.databaseLocks.get(shardIndex).readLock().lock();
@@ -338,6 +426,11 @@ class ServerWorker implements Runnable {
         }
     }
     
+    /**
+     * Puts multiple key-value pairs into the database.
+     * 
+     * @param pairs A map of key-value pairs to store.
+     */
     private void multiPut(Map<String, byte[]> pairs) {
         Map<Integer, Map<String, byte[]>> pairsByShard = new java.util.HashMap<>();
         for (Map.Entry<String, byte[]> entry : pairs.entrySet()) {
@@ -373,6 +466,12 @@ class ServerWorker implements Runnable {
         }
     }
 
+    /**
+     * Gets multiple values associated with a set of keys from the database.
+     * 
+     * @param keys A set of keys to retrieve.
+     * @return A map of key-value pairs.
+     */
     private Map<String, byte[]> multiGet(Set<String> keys) {
         Map<String, byte[]> pairs = new java.util.HashMap<>();
         Map<Integer, List<String>> keysByShard = new java.util.HashMap<>();
@@ -408,6 +507,15 @@ class ServerWorker implements Runnable {
         return pairs;
     }
 
+    /**
+     * Gets the value associated with a key from the database when a condition is met.
+     * 
+     * @param key The key to retrieve.
+     * @param keyCond The key representing the condition.
+     * @param valueCond The value representing the condition.
+     * @return The value associated with the key.
+     * @throws IOException If an error occurs during the operation.
+     */
     private byte[] getWhen(String key, String keyCond, byte[] valueCond) throws IOException {
         int shardIndexCond = database.getDatabaseShardIndex(keyCond);
         ReentrantReadWriteLock lock = database.databaseLocks.get(shardIndexCond);
@@ -463,6 +571,13 @@ class ServerWorker implements Runnable {
         return null;
     }
 
+    /**
+     * Fetches the value associated with a key from the database.
+     * 
+     * @param key The key to retrieve.
+     * @return The value associated with the key.
+     * @throws IOException If an error occurs during the operation.
+     */
     private byte[] fetchTargetValue(String key) throws IOException {
         int shardIndex = database.getDatabaseShardIndex(key);
         ReentrantReadWriteLock targetLock = database.databaseLocks.get(shardIndex);
@@ -475,6 +590,11 @@ class ServerWorker implements Runnable {
         }
     }
 
+    /**
+     * Updates the condition and notifies waiting threads.
+     * 
+     * @param keyCond The key representing the condition.
+     */
     private void updateConditionAndNotify(String keyCond) {
         int shardIndexCond = database.getDatabaseShardIndex(keyCond);
         ReentrantReadWriteLock lock = database.databaseLocks.get(shardIndexCond);
@@ -495,12 +615,21 @@ class ServerWorker implements Runnable {
     }
 }
 
+/**
+ * The main server class that listens for incoming client connections and processes requests.
+ */
 public class Server {
     static int connectedClients = 0;
+    /* Lock for managing the number of active clients */
     static ReentrantLock lock = new ReentrantLock();
+    /* Lock for managing client connections */
     static ReentrantLock lockC = new ReentrantLock();
+    /* Condition for allowing client connections */
     static Condition allowClientConnection = lockC.newCondition();
 
+    /**
+     * Main method that starts the server and accepts client connections.
+     */
     public static void main(String[] args) throws IOException {
         List<Integer> arguments = new java.util.ArrayList<>();
 
@@ -555,6 +684,9 @@ public class Server {
         serverSocket.close();
     }
 
+    /**
+     * Decreases the active client count and signals waiting threads to allow new connections.
+     */
     public static void signalClientDisconnection(){
         lockC.lock();
         try{

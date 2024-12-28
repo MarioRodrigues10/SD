@@ -12,24 +12,34 @@ import java.util.Set;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
-
+/**
+ * The ClientLibrary class provides methods for communication between the client
+ * and the server. It supports authentication, data operations (put, get), and
+ * multi-key operations.
+ */
 public class ClientLibrary {
-    //private Socket socket;
-    //private DataOutputStream out;
-    //private DataInputStream in;
+    /* Handles tagged communication with the server */
     private TaggedConnection taggedConnection;
+    /* Handles message multiplexing/demultiplexing */
     private Demultiplexer demultiplexer;
+    /* Ensures thread-safe operations */
     private final ReentrantLock lock = new ReentrantLock();
+    /* Unique identifier for each request */
     private int tag = 0;
 
+    /* Maps tags to conditions for waiting threads */
     public Map<Integer, Condition> conditionsMap = new HashMap<>();
+    /* Maps tags to server responses */
     public Map<Integer, byte[]> responsesMap = new HashMap<>();
 
+    /**
+     * Constructor to initialize the ClientLibrary with the given server host and port.
+     *
+     * @param host the server hostname
+     * @param port the server port
+     * @throws IOException if there is an issue connecting to the server
+     */
     public ClientLibrary(String host, int port) throws IOException {
-        /*this.socket = new Socket(host, port);
-        this.in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
-        this.out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
-        */
         Socket socket = new Socket(host, port);
         taggedConnection = new TaggedConnection(socket);
         demultiplexer = new Demultiplexer(taggedConnection);
@@ -38,6 +48,14 @@ public class ClientLibrary {
         new Thread(demultiplexer::reader).start();
     }
 
+    /**
+     * Sends a request with a specific tag and waits for a response.
+     *
+     * @param requestType the type of the request
+     * @param requestData the request data
+     * @return the response data
+     * @throws IOException if there is an issue sending the request or receiving the response
+     */
     private byte[] sendWithTag(short requestType, byte[] requestData) throws IOException {
         lock.lock();
         try {
@@ -56,6 +74,14 @@ public class ClientLibrary {
         }
     }
 
+    /**
+     * Authenticates a user with the provided username and password.
+     *
+     * @param username the username
+     * @param password the password
+     * @return true if authentication is successful, false otherwise
+     * @throws IOException if there is an issue during authentication
+     */
     public boolean authenticate(String username, String password) throws IOException {
         lock.lock();
         try {
@@ -80,6 +106,14 @@ public class ClientLibrary {
         }
     }
 
+    /**
+     * Registers a new user with the provided username and password.
+     *
+     * @param username the username
+     * @param password the password
+     * @return true if registration is successful, false otherwise
+     * @throws IOException if there is an issue during registration
+     */
     public boolean register(String username, String password) throws IOException {
         lock.lock();
         try {
@@ -102,6 +136,13 @@ public class ClientLibrary {
         }
     }
 
+    /**
+     * Stores a value with the specified key in the server.
+     *
+     * @param key   the key
+     * @param value the value
+     * @throws IOException if there is an issue storing the data
+     */
     public void put(String key, byte[] value) throws IOException {
         lock.lock();
         try {
@@ -122,6 +163,13 @@ public class ClientLibrary {
         }
     }
 
+    /**
+     * Retrieves the value associated with the specified key from the server.
+     *
+     * @param key the key
+     * @return the value associated with the key, or null if the key does not exist
+     * @throws IOException if there is an issue retrieving the data
+     */
     public byte[] get(String key) throws IOException {
         lock.lock();
         try {
@@ -165,6 +213,12 @@ public class ClientLibrary {
         }
     }
 
+    /**
+     * Stores multiple key-value pairs in the server.
+     *
+     * @param pairs the key-value pairs
+     * @throws IOException if there is an issue storing the data
+     */
     public void multiPut(Map<String, byte[]> pairs) throws IOException {
         lock.lock();
         try {
@@ -187,6 +241,13 @@ public class ClientLibrary {
         }
     }
 
+    /**
+     * Retrieves multiple values associated with the specified keys from the server.
+     *
+     * @param keys the keys
+     * @return a map of key-value pairs
+     * @throws IOException if there is an issue retrieving the data
+     */
     public Map<String, byte[]> multiGet(Set<String> keys) throws IOException {
         lock.lock();
         try {
@@ -238,6 +299,15 @@ public class ClientLibrary {
         }
     }
 
+    /**
+     * Retrieves the value associated with the specified key from the server if it satisfies the condition.
+     *
+     * @param key the key
+     * @param keyCond the key condition
+     * @param valueCond the value condition
+     * @return the value associated with the key, or null if the key does not exist
+     * @throws IOException if there is an issue retrieving the data
+     */
     public byte[] getWhen(String key, String keyCond, byte[] valueCond) throws IOException, InterruptedException {
         lock.lock();
         try {
@@ -277,10 +347,16 @@ public class ClientLibrary {
         }
     }
 
+    /**
+     * Adds a response to the responses map and signals the waiting threads.
+     * 
+     * @param tagR the tag of the response
+     * @param response the response data
+     */
     public void addResponse(int tagR, byte[] response) {
         lock.lock();
         try {
-            if (conditionsMap.containsKey(tagR) || (tagR == 3)) {
+            if (conditionsMap.containsKey(tagR)) {
                 responsesMap.put(tagR, response);
                 conditionsMap.get(tagR).signalAll();
             }
@@ -289,6 +365,11 @@ public class ClientLibrary {
         }
     }
 
+    /**
+     * Closes the connection with the server.
+     *
+     * @throws IOException if there is an issue closing the connection
+     */
     public void close() throws IOException {
         lock.lock();
         try {
@@ -299,6 +380,11 @@ public class ClientLibrary {
         }
     }
 
+    /**
+     * Sends a disconnect message to the server.
+     *
+     * @throws IOException if there is an issue sending the disconnect message
+     */
     public void sendDisconnectMessage() throws IOException {
         lock.lock();
         try {
