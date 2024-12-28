@@ -9,7 +9,9 @@ import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
+
 
 public class ClientLibrary {
     //private Socket socket;
@@ -18,6 +20,10 @@ public class ClientLibrary {
     private TaggedConnection taggedConnection;
     private Demultiplexer demultiplexer;
     private final ReentrantLock lock = new ReentrantLock();
+    private int tag = 0;
+
+    public Map<Integer, Condition> conditionsMap = new HashMap<>();
+    public Map<Integer, byte[]> responsesMap = new HashMap<>();
 
     public ClientLibrary(String host, int port) throws IOException {
         /*this.socket = new Socket(host, port);
@@ -27,12 +33,16 @@ public class ClientLibrary {
         Socket socket = new Socket(host, port);
         taggedConnection = new TaggedConnection(socket);
         demultiplexer = new Demultiplexer(taggedConnection);
+
+        demultiplexer.setClientLibrary(this);
+        new Thread(demultiplexer::reader).start();
     }
 
     private byte[] sendWithTag(short requestType, byte[] requestData) throws IOException {
         lock.lock();
         try {
-            TaggedConnection.Frame frame = new TaggedConnection.Frame(0, requestType, requestData);
+            TaggedConnection.Frame frame = new TaggedConnection.Frame(this.tag, requestType, requestData);
+            this.tag++;
             taggedConnection.send(frame.tag, requestType, requestData);
             
             try {
@@ -115,7 +125,8 @@ public class ClientLibrary {
     public byte[] get(String key) throws IOException {
         lock.lock();
         try {
-            // Envia um pedido de obtenção com a chave
+            int tagG = this.tag;
+            this.tag++;
             byte[] requestData;
             try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(baos)) {
@@ -123,9 +134,25 @@ public class ClientLibrary {
                 dos.writeUTF(key);
                 requestData = baos.toByteArray();
             }
-            byte[] responseData = sendWithTag(RequestType.GetRequest.getValue(), requestData);
-            // Lê a resposta
-            try (ByteArrayInputStream bais = new ByteArrayInputStream(responseData);
+
+            Condition condition = lock.newCondition();
+            conditionsMap.put(tagG, condition);
+
+            demultiplexer.send(tagG, RequestType.GetRequest.getValue(), requestData);
+            
+            while (!responsesMap.containsKey(tagG)) {
+                try {
+                    condition.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted while waiting for response", e);
+                }
+            }
+
+            byte[] response = responsesMap.remove(tagG);
+            conditionsMap.remove(tagG);
+
+            try (ByteArrayInputStream bais = new ByteArrayInputStream(response);
                 DataInputStream dis = new DataInputStream(bais)) {
                 int length = dis.readInt();
                 if (length < 0) return null;
@@ -163,7 +190,8 @@ public class ClientLibrary {
     public Map<String, byte[]> multiGet(Set<String> keys) throws IOException {
         lock.lock();
         try {
-            // Envia um pedido de obtenção múltipla com as chaves
+            int tagG = this.tag;
+            this.tag++;
             byte[] requestData;
             try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(baos)) {
@@ -174,8 +202,24 @@ public class ClientLibrary {
                 }
                 requestData = baos.toByteArray();
             }
-            byte[] responseData = sendWithTag(RequestType.MultiGetRequest.getValue(), requestData);
-            // Lê a resposta
+
+            Condition condition = lock.newCondition();
+            conditionsMap.put(tagG, condition);
+
+            demultiplexer.send(tagG, RequestType.MultiGetRequest.getValue(), requestData);
+
+            while (!responsesMap.containsKey(tagG)) {
+                try {
+                    condition.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted while waiting for response", e);
+                }
+            }
+
+            byte[] responseData = responsesMap.remove(tagG);
+            conditionsMap.remove(tagG);
+            
             try (ByteArrayInputStream bais = new ByteArrayInputStream(responseData);
                  DataInputStream dis = new DataInputStream(bais)) {
                 int n = dis.readInt();
@@ -194,13 +238,14 @@ public class ClientLibrary {
         }
     }
 
-    public byte[] getWhen(String key, String keyCond, byte[] valueCond) throws IOException {
+    public byte[] getWhen(String key, String keyCond, byte[] valueCond) throws IOException, InterruptedException {
         lock.lock();
         try {
-            // Envia um pedido de obtenção condicional com a chave, a chave de condição e o valor de condição
+            int tagG = this.tag;
+            this.tag++;
             byte[] requestData;
             try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                DataOutputStream dos = new DataOutputStream(baos)) {
+                 DataOutputStream dos = new DataOutputStream(baos)) {
                 dos.writeShort(RequestType.GetWhenRequest.getValue());
                 dos.writeUTF(key);
                 dos.writeUTF(keyCond);
@@ -208,15 +253,36 @@ public class ClientLibrary {
                 dos.write(valueCond);
                 requestData = baos.toByteArray();
             }
-            byte[] responseData = sendWithTag(RequestType.GetWhenRequest.getValue(), requestData);
-            // Lê a resposta
-            try (ByteArrayInputStream bais = new ByteArrayInputStream(responseData);
-                 DataInputStream dis = new DataInputStream(bais)) {
-                int length = dis.readInt();
-                if (length < 0) return null;
-                byte[] data = new byte[length];
-                dis.readFully(data);
-                return data;
+
+            Condition condition = lock.newCondition();
+            conditionsMap.put(tagG, condition);
+
+            demultiplexer.send(tagG, RequestType.GetWhenRequest.getValue(), requestData);
+    
+            while (!responsesMap.containsKey(tagG)) {
+                try {
+                    condition.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted while waiting for response", e);
+                }
+            }
+
+            byte[] response = responsesMap.remove(tagG);
+            conditionsMap.remove(tagG);
+            return response;
+
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public void addResponse(int tagR, byte[] response) {
+        lock.lock();
+        try {
+            if (conditionsMap.containsKey(tagR) || (tagR == 3)) {
+                responsesMap.put(tagR, response);
+                conditionsMap.get(tagR).signalAll();
             }
         } finally {
             lock.unlock();

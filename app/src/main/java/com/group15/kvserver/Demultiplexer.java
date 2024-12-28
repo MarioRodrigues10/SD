@@ -14,6 +14,7 @@ public class Demultiplexer implements AutoCloseable {
     private final Map<Integer, BlockingQueue<byte[]>> queues = new ConcurrentHashMap<>();
     private final Thread readerThread;
     private volatile boolean closed = false;
+    private ClientLibrary clientLibrary = null;
 
     public Demultiplexer(TaggedConnection conn) {
         this.conn = conn;
@@ -21,13 +22,19 @@ public class Demultiplexer implements AutoCloseable {
         this.readerThread.start();
     }
 
-    private void reader() {
+    public void setClientLibrary(ClientLibrary clientLibrary) {
+        this.clientLibrary = clientLibrary;
+    }
+
+    public void reader() {
         try {
             while (!closed) {
                 try{
                     TaggedConnection.Frame frame = conn.receive();
                     BlockingQueue<byte[]> queue = queues.computeIfAbsent(frame.tag, k -> new ArrayBlockingQueue<>(1024));
                     queue.put(frame.data);
+
+                    if (clientLibrary != null) clientLibrary.addResponse(frame.tag, frame.data);
                 } catch (EOFException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -61,6 +68,20 @@ public class Demultiplexer implements AutoCloseable {
         BlockingQueue<byte[]> queue = queues.computeIfAbsent(tag, k -> new ArrayBlockingQueue<>(1024));
         return queue.take();
     }
+
+    public TaggedConnection.Frame receiveAny() throws InterruptedException {
+        while (!closed) {
+            for (Map.Entry<Integer, BlockingQueue<byte[]>> entry : queues.entrySet()) {
+                BlockingQueue<byte[]> queue = entry.getValue();
+                byte[] data = queue.poll();
+    
+                if (data != null) {
+                    return new TaggedConnection.Frame(entry.getKey(), (short) 0, data);
+                }
+            }
+        }
+        throw new InterruptedException("Demultiplexer is closed.");
+    }  
 
     @Override
     public void close() throws IOException {

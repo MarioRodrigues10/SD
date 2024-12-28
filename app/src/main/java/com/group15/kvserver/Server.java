@@ -87,6 +87,7 @@ class ServerWorker implements Runnable {
     private Socket socket;
     private ServerDatabase database;
     private final Demultiplexer demultiplexer;
+    private Map<Condition, List<Integer>> conditionsTags = new HashMap<>();
 
     public ServerWorker(Socket socket, ServerDatabase database) throws IOException {
         this.demultiplexer = new Demultiplexer(new TaggedConnection(socket));
@@ -106,13 +107,12 @@ class ServerWorker implements Runnable {
 
                 TaggedConnection.Frame frame = new TaggedConnection.Frame(0, (short)0, new byte[0]);
                 try {
-                    byte[] receivedData = demultiplexer.receive(0); // Tag 0 para pedidos
-                    frame = new TaggedConnection.Frame(0, (short)0, receivedData);
+                    frame = demultiplexer.receiveAny();
                 } catch (InterruptedException e) {
                     Logger.log(e.getMessage(), Logger.LogLevel.ERROR);
                 }
 
-                // Processar pedido
+                // Process request
                 ByteArrayInputStream bais = new ByteArrayInputStream(frame.data);
                 DataInputStream in = new DataInputStream(bais);
                 try {
@@ -125,7 +125,7 @@ class ServerWorker implements Runnable {
                     }
                     if (requestType >= 0 && requestType < RequestType.values().length) {
                         RequestType r = RequestType.values()[requestType];
-                        byte[] stream = handleRequest(r, in);
+                        byte[] stream = handleRequest(r, in, frame.tag);
                         if (stream != null) {
                             demultiplexer.send(frame.tag, r.getValue(), stream);
                         }
@@ -154,7 +154,7 @@ class ServerWorker implements Runnable {
         }
     }
 
-    public byte[] handleRequest(RequestType requestType, DataInputStream in){
+    public byte[] handleRequest(RequestType requestType, DataInputStream in, int tag){
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(baos);
@@ -178,7 +178,10 @@ class ServerWorker implements Runnable {
                     handleMultiGetRequest(in, out);
                     break;
                 case GetWhenRequest:
-                    handleGetWhenRequest(in, out);
+                    int flag = handleGetWhenRequest(in, out, tag);
+                    if (flag == -1) {
+                        return null;
+                    }
                     break;
                 default:
                     break;
@@ -279,7 +282,7 @@ class ServerWorker implements Runnable {
         }
     }
 
-    private void handleGetWhenRequest(DataInputStream in, DataOutputStream out) throws IOException {
+    private int handleGetWhenRequest(DataInputStream in, DataOutputStream out, int tag) throws IOException {
         // Chaves e valores para a condição
         String key = in.readUTF();
         String keyCond = in.readUTF();
@@ -287,13 +290,27 @@ class ServerWorker implements Runnable {
         byte[] valueCond = new byte[valueCondLength];
         in.readFully(valueCond);
 
+        int shardIndexCond = database.getDatabaseShardIndex(keyCond);
+        ReentrantReadWriteLock lock = database.databaseLocks.get(shardIndexCond);
+        Condition condition;
+        lock.writeLock().lock();
+        try {
+            condition = database.conditions.computeIfAbsent(keyCond, k -> lock.writeLock().newCondition());
+            conditionsTags.putIfAbsent(condition, new java.util.ArrayList<>());
+            conditionsTags.get(condition).add(tag);
+        }
+        finally {
+            lock.writeLock().unlock();
+        }
+
         byte[] result = getWhen(key, keyCond, valueCond);
         if (result != null) {
             out.writeInt(result.length);
             out.write(result);
+            return 0;
         }
-        else{
-            out.writeInt(-1);
+        else {
+            return -1;
         }
     }
 
@@ -394,23 +411,59 @@ class ServerWorker implements Runnable {
     private byte[] getWhen(String key, String keyCond, byte[] valueCond) throws IOException {
         int shardIndexCond = database.getDatabaseShardIndex(keyCond);
         ReentrantReadWriteLock lock = database.databaseLocks.get(shardIndexCond);
+        Condition condition;
         lock.writeLock().lock();
         try {
             Map<String, byte[]> currentShardCond = database.databaseShards.get(shardIndexCond);
-            Condition condition = lock.writeLock().newCondition();
-            database.conditions.put(keyCond, condition);
+            condition = database.conditions.computeIfAbsent(keyCond, k -> lock.writeLock().newCondition());
 
-            while (!java.util.Arrays.equals(currentShardCond.get(keyCond), valueCond)) {
-                try {
-                    condition.await();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
+            // Check the condition before waiting
+            if (java.util.Arrays.equals(currentShardCond.get(keyCond), valueCond)) {
+                Logger.log("Condition met for key: " + keyCond, Logger.LogLevel.INFO);
+                conditionsTags.get(condition).remove(0);
+                return fetchTargetValue(key);
             }
         } finally {
             lock.writeLock().unlock();
         }
 
+        final Condition finalCondition = condition;
+        Runnable task = () -> {
+            lock.writeLock().lock();
+            try {
+                Map<String, byte[]> currentShardCond = database.databaseShards.get(shardIndexCond);
+                while (!java.util.Arrays.equals(currentShardCond.get(keyCond), valueCond)) {
+                    try {
+                        finalCondition.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        Logger.log("Interrupted while waiting for condition on key: " + keyCond, Logger.LogLevel.ERROR);
+                        return;
+                    }
+                }
+                byte[] result = fetchTargetValue(key);
+                if (result != null) {
+                    Logger.log("Condition met for key: " + keyCond, Logger.LogLevel.INFO);
+                    try {
+                        int tag = conditionsTags.get(finalCondition).get(0);
+                        conditionsTags.get(finalCondition).remove(0);
+                        demultiplexer.send(tag, RequestType.GetWhenRequest.getValue(), result);
+                        Logger.log("Sent result for key: " + keyCond, Logger.LogLevel.INFO);
+                    } catch (IOException e) {
+                        Logger.log("Failed to send result: " + e.getMessage(), Logger.LogLevel.ERROR);
+                    }
+                }
+            } catch (IOException e) {
+                            e.printStackTrace();
+                        } finally {
+                lock.writeLock().unlock();
+            }
+        };
+        new Thread(task).start();
+        return null;
+    }
+
+    private byte[] fetchTargetValue(String key) throws IOException {
         int shardIndex = database.getDatabaseShardIndex(key);
         ReentrantReadWriteLock targetLock = database.databaseLocks.get(shardIndex);
         targetLock.readLock().lock();
@@ -420,7 +473,6 @@ class ServerWorker implements Runnable {
         } finally {
             targetLock.readLock().unlock();
         }
-
     }
 
     private void updateConditionAndNotify(String keyCond) {
