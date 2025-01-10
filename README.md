@@ -1,4 +1,4 @@
-# Distributed key-value store 🔑
+# Distributed key-value store 🔑 - 19.1/20
 
 This project was developed for the Distributed Systems class and focuses on implementing a key-value storage database optimized for concurrent operations performed by multiple clients.
 
